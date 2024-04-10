@@ -12,11 +12,12 @@ from omegaconf import DictConfig
 from dpr.data.tables import Table
 from dpr.utils.data_utils import read_data_from_json_files, Dataset
 
-logger = logging.getLogger(__name__)
-BiEncoderPassage = collections.namedtuple("BiEncoderPassage", ["text", "title"])
+logger = logging.getLogger(__name__) # 初始化了一个日志记录器，用于记录当前模块（由 __name__ 表示）的日志信息
+BiEncoderPassage = collections.namedtuple("BiEncoderPassage", ["text", "title"]) # 使用 collections.namedtuple 定义了一个新的数据结构 BiEncoderPassage。这是一个便捷的方法，用于创建一个简单的类来存储文章的文本和标题
 
 
 def get_dpr_files(source_name) -> List[str]:
+    # 首先检查给定的 source_name 是否存在或是否能匹配到文件。如果是，就直接返回匹配到的文件列表。如果不是，它尝试调用一个数据下载器来下载数据
     if os.path.exists(source_name) or glob.glob(source_name):
         return glob.glob(source_name)
     else:
@@ -26,6 +27,7 @@ def get_dpr_files(source_name) -> List[str]:
 
 
 class BiEncoderSample(object):
+    # BiEncoderSample 类定义了一个双编码器样本的结构，包含一个查询 (query) 以及与之相关的正面、负面和困难负面文章列表
     query: str
     positive_passages: List[BiEncoderPassage]
     negative_passages: List[BiEncoderPassage]
@@ -45,13 +47,17 @@ class JsonQADataset(Dataset):
         # tmp: for cc-net results only
         exclude_gold: bool = False,
     ):
+        """ 
+        file: 一个字符串，指定包含数据的文件或文件夹路径。
+        selector, special_token, encoder_type, shuffle_positives, normalize, query_special_suffix, exclude_gold: 这些参数允许用户定制数据加载和处理的不同方面，例如选择器配置、特殊令牌、编码器类型、是否打乱正例、是否规范化文本、查询的特殊后缀、是否排除黄金（gold）数据等。
+        """
         super().__init__(
             selector,
             special_token=special_token,
             encoder_type=encoder_type,
             shuffle_positives=shuffle_positives,
             query_special_suffix=query_special_suffix,
-        )
+        ) # 调用父类 Dataset 的初始化方法，将一些参数传递给它
         self.file = file
         self.data_files = []
         self.normalize = normalize
@@ -64,6 +70,7 @@ class JsonQADataset(Dataset):
         return len(self.data)
 
     def load_data(self, start_pos: int = -1, end_pos: int = -1):
+        # 根据指定的起始和结束位置加载数据的子集。如果 self.data 尚未加载，则先加载所有数据。然后，如果指定了有效的起始和结束位置，它会更新 self.data 以仅包含这个范围内的数据。
         if not self.data:
             self._load_all_data()
         if start_pos >= 0 and end_pos >= 0:
@@ -71,6 +78,7 @@ class JsonQADataset(Dataset):
             self.data = self.data[start_pos:end_pos]
 
     def _load_all_data(self):
+        # 加载并处理所有数据文件。首先，使用 get_dpr_files 函数（未在代码段中定义）获取数据文件的路径，然后读取这些文件并过滤出包含正面上下文 (positive_ctxs) 的记录
         self.data_files = get_dpr_files(self.file)
         logger.info("Data files: %s", self.data_files)
         data = read_data_from_json_files(self.data_files)
@@ -79,29 +87,35 @@ class JsonQADataset(Dataset):
         logger.info("Total cleaned data size: %d", len(self.data))
 
     def __getitem__(self, index) -> BiEncoderSample:
+        # 是数据集类的一个标准方法，使得该类的实例可以像列表一样通过索引访问。该方法的目的是根据索引从数据集中提取一个问题及其相关的上下文，然后将这些信息封装在一个 BiEncoderSample 对象中返回
         json_sample = self.data[index]
-        r = BiEncoderSample()
-        r.query = self._process_query(json_sample["question"])
+        r = BiEncoderSample() # 创建一个 BiEncoderSample 实例。假设这是一个用来存储问题和上下文信息的类
+        r.query = self._process_query(json_sample["question"]) # 调用 _process_query 方法处理问题文本，并将结果赋值给 r.query
 
         positive_ctxs = json_sample["positive_ctxs"]
         if self.exclude_gold:
+            # 如果设置了 exclude_gold，则只选择那些包含 "score" 字段的正面上下文
             ctxs = [ctx for ctx in positive_ctxs if "score" in ctx]
             if ctxs:
                 positive_ctxs = ctxs
 
+        # 获取标记为负面和硬负面的上下文。如果这些字段不存在于样本中，则默认为空列表
         negative_ctxs = json_sample["negative_ctxs"] if "negative_ctxs" in json_sample else []
         hard_negative_ctxs = json_sample["hard_negative_ctxs"] if "hard_negative_ctxs" in json_sample else []
 
         for ctx in positive_ctxs + negative_ctxs + hard_negative_ctxs:
+            # 遍历所有类型的上下文（正面、负面、硬负面），如果某个上下文没有标题 ("title")，则将其标题设置为 None
             if "title" not in ctx:
                 ctx["title"] = None
 
         def create_passage(ctx: dict):
+            # 将上下文字典转换成 BiEncoderPassage 对象。如果设置了 self.normalize，则对上下文文本进行规范化处理。
             return BiEncoderPassage(
                 normalize_passage(ctx["text"]) if self.normalize else ctx["text"],
                 ctx["title"],
             )
 
+        # 使用 create_passage 函数处理所有类型的上下文，并将结果分别赋值给 r.positive_passages、r.negative_passages 和 r.hard_negative_passages
         r.positive_passages = [create_passage(ctx) for ctx in positive_ctxs]
         r.negative_passages = [create_passage(ctx) for ctx in negative_ctxs]
         r.hard_negative_passages = [create_passage(ctx) for ctx in hard_negative_ctxs]
@@ -172,10 +186,13 @@ class JsonlQADataset(JsonQADataset):
 
 
 def normalize_passage(ctx_text: str):
-    ctx_text = ctx_text.replace("\n", " ").replace("’", "'")
+    ctx_text = ctx_text.replace("\n", " ").replace("’", "'")     
+    # 将文本中的换行符\n替换为空格，以便将多行文本转换为单行。然后，将所有的’（右单引号）替换为标准的单引号'。这些替换有助于统一文本格式，消除由于字符变体或格式差异引入的不一致性
     if ctx_text.startswith('"'):
+        # 检查文本是否以双引号"开头。如果是，说明文本的开始部分可能包含了不需要的引号，需要将其移除
         ctx_text = ctx_text[1:]
     if ctx_text.endswith('"'):
+        # 检查文本是否以双引号"结尾。同样地，如果文本以不需要的引号结尾，也应该将其移除
         ctx_text = ctx_text[:-1]
     return ctx_text
 

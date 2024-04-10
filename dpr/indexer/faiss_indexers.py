@@ -21,7 +21,10 @@ logger = logging.getLogger()
 
 
 class DenseIndexer(object):
+    # 处理和管理稠密向量索引的基础框架。这个类通过定义一系列方法来支持向量的索引、搜索、序列化和反序列化操作
     def __init__(self, buffer_size: int = 50000):
+        # 构造函数初始化一个名为buffer_size的实例变量，此变量用于定义索引操作中使用的缓冲区大小
+        # 初始化了index_id_to_db_id列表，用于映射索引ID到数据库ID，以及index变量，用于存储实际的索引结构
         self.buffer_size = buffer_size
         self.index_id_to_db_id = []
         self.index = None
@@ -39,8 +42,10 @@ class DenseIndexer(object):
         raise NotImplementedError
 
     def serialize(self, file: str):
+        # 将索引和与之关联的元数据（index_id_to_db_id映射）序列化到文件中
         logger.info("Serializing index to %s", file)
 
+        # 根据传入的file路径来决定文件名
         if os.path.isdir(file):
             index_file = os.path.join(file, "index.dpr")
             meta_file = os.path.join(file, "index_meta.dpr")
@@ -48,11 +53,14 @@ class DenseIndexer(object):
             index_file = file + ".index.dpr"
             meta_file = file + ".index_meta.dpr"
 
+        # 使用faiss.write_index函数将索引保存到文件
         faiss.write_index(self.index, index_file)
+        # 使用pickle将映射关系保存到另一个文件
         with open(meta_file, mode="wb") as f:
             pickle.dump(self.index_id_to_db_id, f)
 
     def get_files(self, path: str):
+        # 根据传入的路径path，这个方法决定索引文件和元数据文件的具体路径名。如果路径是一个目录，则文件名按照固定格式生成；如果路径不是目录，则文件名会根据索引的类型进行定制
         if os.path.isdir(path):
             index_file = os.path.join(path, "index.dpr")
             meta_file = os.path.join(path, "index_meta.dpr")
@@ -62,10 +70,12 @@ class DenseIndexer(object):
         return index_file, meta_file
 
     def index_exists(self, path: str):
+        # 检查给定路径下是否存在索引文件和元数据文件
         index_file, meta_file = self.get_files(path)
         return os.path.isfile(index_file) and os.path.isfile(meta_file)
 
     def deserialize(self, path: str):
+        # 与serialize方法相对，这个方法用于从文件中加载索引和元数据。通过调用faiss.read_index来加载索引，并使用pickle加载ID映射
         logger.info("Loading index from %s", path)
         index_file, meta_file = self.get_files(path)
 
@@ -79,6 +89,7 @@ class DenseIndexer(object):
         ), "Deserialized index_id_to_db_id should match faiss index size"
 
     def _update_id_mapping(self, db_ids: List) -> int:
+        # 更新index_id_to_db_id映射。它接受一个数据库ID列表，并将这些ID追加到映射列表中
         self.index_id_to_db_id.extend(db_ids)
         return len(self.index_id_to_db_id)
 
